@@ -18,6 +18,10 @@ services:
       # read-only: this service only ever reads the sparse index that
       # fireguard-vector-store's ingest job writes — it never builds it
       - ../fireguard-vector-store/data:/app/data:ro
+      # reuse the SAME embedding model cache fireguard-vector-store
+      # already downloaded (same model name) — avoids a redundant ~90MB
+      # download on first startup
+      - ../fireguard-vector-store/data/hf_cache:/app/.cache/huggingface:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
       interval: 30s

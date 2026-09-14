@@ -1,18 +1,13 @@
-"""FastAPI application entry point.
-
-Grows as each build step wires in a new service — dense search (Step 2),
-sparse search (Step 3), the fused /retrieve endpoint (Step 4), reranking
-(Step 5). See README.md's build-status checklist for what's done.
-"""
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.exceptions import DenseSearchError, SparseSearchError
+from app.exceptions import DenseSearchError, RerankError, SparseSearchError
 from app.logger import get_logger
 from app.schemas import ChunkResponse, RetrievalRequest
 from app.services.dense_search import DenseSearchService
 from app.services.hybrid_fusion import reciprocal_rank_fusion
+from app.services.reranker import RerankerService
 from app.services.sparse_search import SparseSearchService
 
 logger = get_logger(__name__)
@@ -26,24 +21,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Loaded once at startup (see on_startup below), never per-request —
-# holding them as module-level singletons is what makes that possible.
 dense_service: DenseSearchService | None = None
 sparse_service: SparseSearchService | None = None
+reranker_service: RerankerService | None = None
 
 
 @app.get("/health")
 async def health() -> dict:
-    """Basic liveness check — confirms the API process itself is up.
-    Does NOT check ChromaDB or the sparse index; those get their own
-    /health/dense and /health/sparse checks."""
     return {"status": "ok", "service": settings.api_title}
 
 
 @app.get("/health/dense")
 async def health_dense() -> dict:
-    """Proves the ChromaDB connection is real by counting chunks in the
-    collection — not just that the client object was constructed."""
     if dense_service is None:
         raise HTTPException(
             status_code=503, detail="Dense search service not initialized"
@@ -61,8 +50,6 @@ async def health_dense() -> dict:
 
 @app.get("/health/sparse")
 async def health_sparse() -> dict:
-    """Proves the FTS5 index actually has rows — not just that the .db
-    file exists on disk."""
     if sparse_service is None:
         raise HTTPException(
             status_code=503, detail="Sparse search service not initialized"
@@ -74,9 +61,22 @@ async def health_sparse() -> dict:
     return {"status": "ok", "db_path": settings.sparse_db_path, "row_count": count}
 
 
+@app.get("/health/reranker")
+async def health_reranker() -> dict:
+    if reranker_service is None:
+        raise HTTPException(
+            status_code=503, detail="Reranker service not initialized"
+        )
+    try:
+        reranker_service.self_check()
+    except RerankError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "ok", "model": settings.reranker_model_name}
+
+
 @app.post("/api/v1/retrieve", response_model=list[ChunkResponse])
 async def retrieve(request: RetrievalRequest) -> list[ChunkResponse]:
-    if dense_service is None or sparse_service is None:
+    if dense_service is None or sparse_service is None or reranker_service is None:
         raise HTTPException(status_code=503, detail="Search services not initialized")
 
     try:
@@ -94,12 +94,20 @@ async def retrieve(request: RetrievalRequest) -> list[ChunkResponse]:
         raise HTTPException(status_code=503, detail=f"Sparse search failed: {exc}") from exc
 
     fused = reciprocal_rank_fusion(dense_results, sparse_results)
-    return fused[: request.top_k]
+
+    candidates = fused[: settings.rerank_candidate_k]
+    try:
+        reranked = reranker_service.rerank(request.query, candidates)
+    except RerankError as exc:
+        raise HTTPException(status_code=503, detail=f"Reranking failed: {exc}") from exc
+
+    return reranked[: request.top_k]
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    global dense_service, sparse_service
+    global dense_service, sparse_service, reranker_service
     logger.info(f"{settings.api_title} v{settings.api_version} starting up")
     dense_service = DenseSearchService()
     sparse_service = SparseSearchService()
+    reranker_service = RerankerService()

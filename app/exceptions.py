@@ -1,6 +1,3 @@
-"""Custom exceptions — never let raw library errors leak into API responses."""
-
-
 class RetrievalError(Exception):
     """Base exception for the retrieval agent domain."""
 

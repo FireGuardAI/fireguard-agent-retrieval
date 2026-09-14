@@ -1,10 +1,3 @@
-"""Reciprocal Rank Fusion (RRF) — combines dense and sparse result lists
-into one ranked list using each item's RANK POSITION rather than its raw
-score. This matters because dense distances and sparse BM25 scores live
-on completely different, incomparable scales; RRF sidesteps that by only
-caring about "how many results ranked better than this one," which is
-scale-agnostic by construction.
-"""
 from app.config import settings
 
 
@@ -22,9 +15,6 @@ def reciprocal_rank_fusion(
         for rank, doc in enumerate(results, start=1):
             doc_id = doc["id"]
             rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (k + rank)
-            # keep the first-seen copy of the chunk's text/metadata — both
-            # indexes store identical text for the same chunk_id, so which
-            # one "wins" here doesn't change the content
             doc_map.setdefault(doc_id, doc)
             found_by.setdefault(doc_id, set()).add(label)
 
@@ -42,8 +32,6 @@ def reciprocal_rank_fusion(
                 "text": doc["text"],
                 "metadata": doc.get("metadata"),
                 "rrf_score": score,
-                # sorted() so it's deterministic: ["dense"], ["sparse"],
-                # or ["dense", "sparse"] when both retrievers agreed
                 "found_by": sorted(found_by[doc_id]),
             }
         )

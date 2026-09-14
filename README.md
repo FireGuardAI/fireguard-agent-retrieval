@@ -11,7 +11,7 @@ and optionally reranks with a cross-encoder.
       Dockerized + joined to `fireguard-vector-store`'s Docker network
 - [x] **Step 2** — Dense search (ChromaDB), `/health/dense`
 - [x] **Step 3** — Sparse search (SQLite FTS5, schema-corrected), `/health/sparse`
-- [ ] Step 4 — RRF fusion + `/api/v1/retrieve`
+- [x] **Step 4** — RRF fusion + `/api/v1/retrieve`
 - [ ] Step 5 — Reranker (optional)
 - [ ] Step 6 — Dockerize + compose integration
 
@@ -119,3 +119,29 @@ Expected:
 ```json
 {"status":"ok","db_path":"data/bm25.db","row_count":1094}
 ```
+
+## Step 4 — Hybrid retrieval (`/api/v1/retrieve`)
+
+Fetches top-20 from each retriever, fuses them with RRF (`app/services
+/hybrid_fusion.py`), and returns the requested `top_k`. Each result's
+`found_by` field shows whether dense, sparse, or **both** retrievers
+surfaced that chunk — chunks found by both tend to rank highest, which
+is the actual point of hybrid search.
+
+**Fixed from the reference doc:** the `RetrievalRequest.tenant_id` field
+was defined but never used anywhere — removed. Add it back only once
+there's an actual multi-tenant collection scheme to route it to.
+
+```powershell
+docker compose up -d --build
+```
+
+```powershell
+$body = @{ query = "What are the fire extinguisher requirements?"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8001/api/v1/retrieve" -Method Post -Body $body -ContentType "application/json"
+```
+
+Expected: a JSON array of up to 5 chunks, each with `id`, `text`,
+`rrf_score`, `found_by`, `metadata`. Chunks with `"found_by":
+["dense","sparse"]` near the top of the list confirm fusion is actually
+combining both retrievers, not just picking one.

@@ -1,16 +1,17 @@
 """FastAPI application entry point.
 
-STEP 1 of the build: app skeleton + a plain health check only. Dense
-search, sparse search, and the /retrieve endpoint are added in later
-steps — this file grows as each service is wired in, not all at once.
+Grows as each build step wires in a new service — dense search (Step 2),
+sparse search (Step 3), the fused /retrieve endpoint (Step 4), reranking
+(Step 5). See README.md's build-status checklist for what's done.
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.exceptions import DenseSearchError
+from app.exceptions import DenseSearchError, SparseSearchError
 from app.logger import get_logger
 from app.services.dense_search import DenseSearchService
+from app.services.sparse_search import SparseSearchService
 
 logger = get_logger(__name__)
 
@@ -24,8 +25,9 @@ app.add_middleware(
 )
 
 # Loaded once at startup (see on_startup below), never per-request —
-# holding it as a module-level singleton is what makes that possible.
+# holding them as module-level singletons is what makes that possible.
 dense_service: DenseSearchService | None = None
+sparse_service: SparseSearchService | None = None
 
 
 @app.get("/health")
@@ -55,8 +57,24 @@ async def health_dense() -> dict:
     }
 
 
+@app.get("/health/sparse")
+async def health_sparse() -> dict:
+    """Proves the FTS5 index actually has rows — not just that the .db
+    file exists on disk."""
+    if sparse_service is None:
+        raise HTTPException(
+            status_code=503, detail="Sparse search service not initialized"
+        )
+    try:
+        count = sparse_service.count()
+    except SparseSearchError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"status": "ok", "db_path": settings.sparse_db_path, "row_count": count}
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
-    global dense_service
+    global dense_service, sparse_service
     logger.info(f"{settings.api_title} v{settings.api_version} starting up")
     dense_service = DenseSearchService()
+    sparse_service = SparseSearchService()

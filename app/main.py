@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.exceptions import DenseSearchError, SparseSearchError
 from app.logger import get_logger
+from app.schemas import ChunkResponse, RetrievalRequest
 from app.services.dense_search import DenseSearchService
+from app.services.hybrid_fusion import reciprocal_rank_fusion
 from app.services.sparse_search import SparseSearchService
 
 logger = get_logger(__name__)
@@ -70,6 +72,29 @@ async def health_sparse() -> dict:
     except SparseSearchError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "ok", "db_path": settings.sparse_db_path, "row_count": count}
+
+
+@app.post("/api/v1/retrieve", response_model=list[ChunkResponse])
+async def retrieve(request: RetrievalRequest) -> list[ChunkResponse]:
+    if dense_service is None or sparse_service is None:
+        raise HTTPException(status_code=503, detail="Search services not initialized")
+
+    try:
+        dense_results = dense_service.search(
+            request.query, top_k=settings.dense_top_k
+        )
+    except DenseSearchError as exc:
+        raise HTTPException(status_code=503, detail=f"Dense search failed: {exc}") from exc
+
+    try:
+        sparse_results = sparse_service.search(
+            request.query, top_k=settings.sparse_top_k
+        )
+    except SparseSearchError as exc:
+        raise HTTPException(status_code=503, detail=f"Sparse search failed: {exc}") from exc
+
+    fused = reciprocal_rank_fusion(dense_results, sparse_results)
+    return fused[: request.top_k]
 
 
 @app.on_event("startup")

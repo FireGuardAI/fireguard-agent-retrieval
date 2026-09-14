@@ -1,4 +1,3 @@
-"""Structured, leveled logging — no print() statements anywhere."""
 import logging
 import sys
 
@@ -8,7 +7,7 @@ from app.config import settings
 def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
-        return logger  # avoid duplicate handlers on re-import
+        return logger 
 
     logger.setLevel(settings.log_level)
     handler = logging.StreamHandler(sys.stdout)

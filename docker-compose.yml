@@ -1,0 +1,39 @@
+services:
+  agent-retrieval:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fireguard-agent-retrieval
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8001"   # localhost only, matching the vector-store project's convention
+    env_file:
+      - .env
+    environment:
+      # inside the shared Docker network, reach ChromaDB by its service
+      # name — .env's CHROMA_HOST=localhost is only a fallback for
+      # running this API outside Docker
+      - CHROMA_HOST=chromadb
+    volumes:
+      # read-only: this service only ever reads the sparse index that
+      # fireguard-vector-store's ingest job writes — it never builds it
+      - ../fireguard-vector-store/data:/app/data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - fireguard-net
+
+networks:
+  fireguard-net:
+    external: true
+    # this is the network fireguard-vector-store's docker-compose.yml
+    # creates — Compose prefixes it with that project's folder name.
+    # If your fireguard-vector-store folder isn't named exactly
+    # "fireguard-vector-store", update this to match (check with
+    # `docker network ls` if the agent-retrieval container fails to
+    # start with a "network not found" error).
+    name: fireguard-vector-store_fireguard-net

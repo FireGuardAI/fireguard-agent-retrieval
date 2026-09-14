@@ -10,7 +10,7 @@ and optionally reranks with a cross-encoder.
 - [x] **Step 1** — FastAPI skeleton, config/logger/exceptions, `/health`,
       Dockerized + joined to `fireguard-vector-store`'s Docker network
 - [x] **Step 2** — Dense search (ChromaDB), `/health/dense`
-- [ ] Step 3 — Sparse search (SQLite FTS5)
+- [x] **Step 3** — Sparse search (SQLite FTS5, schema-corrected), `/health/sparse`
 - [ ] Step 4 — RRF fusion + `/api/v1/retrieve`
 - [ ] Step 5 — Reranker (optional)
 - [ ] Step 6 — Dockerize + compose integration
@@ -98,3 +98,24 @@ Expected (chunk_count will match whatever's actually ingested):
 If `chunk_count` is `0` or the request returns `503`, `fireguard-vector
 -store`'s ingestion hasn't run yet, or the collection name/host doesn't
 match — check `docker compose logs agent-retrieval`.
+
+## Step 3 — Sparse search (SQLite FTS5)
+
+`app/services/sparse_search.py` queries the real `chunks_fts` schema
+(`chunk_id`, `source`, `page`, `text`) — the original reference doc this
+was built from queried columns (`id`, `metadata`, `rank`) that don't
+exist in the actual table `fireguard-vector-store/src/sparse_index.py`
+creates. Fixed to match. `id` values use the same `chunk_id` scheme as
+dense search's ids, which matters for Step 4 — RRF fusion matches results
+across both indexes by id, so this consistency is what lets it recognize
+"the same chunk found both ways."
+
+```powershell
+docker compose up -d --build
+curl.exe http://localhost:8001/health/sparse
+```
+
+Expected:
+```json
+{"status":"ok","db_path":"data/bm25.db","row_count":1094}
+```

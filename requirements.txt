@@ -1,9 +1,21 @@
-# Step 1: API skeleton only.
-# Step 2 adds chromadb + sentence-transformers + CPU-only torch (dense search).
-# Step 3 needs nothing extra (sqlite3 is Python stdlib).
-# Step 5 adds a reranker (flashrank or sentence-transformers CrossEncoder).
-
+# Step 1: API skeleton
 fastapi>=0.110.0,<0.120.0
 uvicorn[standard]>=0.28.0,<0.30.0
 pydantic>=2.6.0,<3.0.0
 pydantic-settings>=2.2.0,<3.0.0
+
+# Step 2: Dense search — CPU-only torch (see fireguard-vector-store's
+# requirements.txt for why: avoids ~2.5GB of unused CUDA/GPU downloads)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.4.1+cpu
+
+chromadb==0.5.23   # MUST match fireguard-vector-store's server image tag
+sentence-transformers>=2.5.0,<3.0.0
+
+# Pinned for the same reason as fireguard-vector-store: avoids pip's
+# slow backtracking resolver loop across dozens of transformers versions
+transformers==4.46.3
+huggingface-hub==0.36.2
+
+# Step 5 will add a reranker (flashrank or sentence-transformers CrossEncoder)

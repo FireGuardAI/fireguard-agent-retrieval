@@ -9,7 +9,7 @@ and optionally reranks with a cross-encoder.
 
 - [x] **Step 1** — FastAPI skeleton, config/logger/exceptions, `/health`,
       Dockerized + joined to `fireguard-vector-store`'s Docker network
-- [ ] Step 2 — Dense search (ChromaDB)
+- [x] **Step 2** — Dense search (ChromaDB), `/health/dense`
 - [ ] Step 3 — Sparse search (SQLite FTS5)
 - [ ] Step 4 — RRF fusion + `/api/v1/retrieve`
 - [ ] Step 5 — Reranker (optional)
@@ -73,3 +73,28 @@ If it fails with a "network not found" error, your `fireguard-vector-store`
 folder isn't named exactly that — run `docker network ls`, find the actual
 network name (it'll be `<your-folder-name>_fireguard-net`), and update the
 `name:` field under `networks:` in `docker-compose.yml` to match.
+
+## Step 2 — Dense search (ChromaDB)
+
+`app/services/dense_search.py` loads the embedding model once at startup
+(not per-request — that would add seconds of latency to every call) and
+connects to `fireguard-vector-store`'s `fire_safety_regulations`
+collection. It uses `get_collection` (not `get_or_create`), so it fails
+loudly on startup if the collection doesn't exist yet, rather than
+silently creating an empty one.
+
+Rebuild and test:
+
+```powershell
+docker compose up -d --build
+curl.exe http://localhost:8001/health/dense
+```
+
+Expected (chunk_count will match whatever's actually ingested):
+```json
+{"status":"ok","collection":"fire_safety_regulations","chunk_count":1094}
+```
+
+If `chunk_count` is `0` or the request returns `503`, `fireguard-vector
+-store`'s ingestion hasn't run yet, or the collection name/host doesn't
+match — check `docker compose logs agent-retrieval`.
